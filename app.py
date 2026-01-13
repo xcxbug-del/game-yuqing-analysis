@@ -14,6 +14,18 @@ warnings.filterwarnings('ignore')
 st.set_page_config(page_title="游戏测试群舆情分析工具", layout="wide")
 st.title("🎮 游戏测试群舆情分析工具（面试完整版）")
 
+# ========== 工具函数：安全处理数值 ==========
+def safe_divide(a, b, default=0.0):
+    """安全除法，避免除零错误"""
+    try:
+        return a / b if b != 0 else default
+    except:
+        return default
+
+def clamp_value(value, min_val=0.0, max_val=1.0):
+    """将数值限制在指定范围"""
+    return max(min_val, min(max_val, value))
+
 # ========== 核心解析函数（完全保留）==========
 def parse_txt_chat(chat_text, custom_module_rules):
     lines = chat_text.split('\n')
@@ -83,40 +95,44 @@ def parse_txt_chat(chat_text, custom_module_rules):
     return df
 
 def parse_csv_chat(csv_file, custom_module_rules):
-    df = pd.read_csv(csv_file)
-    required_cols = ['content']
-    if not all(col in df.columns for col in required_cols):
-        st.error("❌ CSV文件必须包含 'content' 列（聊天内容）")
-        return None
-    if 'chat_id' not in df.columns:
-        df['chat_id'] = range(1, len(df)+1)
-    if 'create_time' not in df.columns:
-        df['create_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    if 'user_id' not in df.columns:
-        df['user_id'] = [f"user{random.randint(1, 500)}" for _ in range(len(df))]
-    if 'game_module' not in df.columns:
-        module_keywords = custom_module_rules if custom_module_rules else {
-            "装备系统": ["装备", "数值", "强化", "掉落", "充值", "道具"],
-            "玩法机制": ["副本", "技能", "连招", "数值平衡", "活动", "难度"],
-            "抽卡系统": ["抽卡", "概率", "保底", "新卡", "次数"],
-            "客服互动": ["客服", "响应", "反馈", "解决", "态度"],
-            "版本更新": ["版本", "更新", "卡顿", "BUG", "更新包"],
-            "社交闲聊": ["组队", "聊天", "好友", "公会", "截图"],
-            "BUG反馈": ["闪退", "卡顿", "BUG", "崩溃", "外挂", "登录"],
-            "进度分享": ["升级", "通关", "进度", "任务", "奖励"]
-        }
-        def classify_module(content):
-            if pd.isna(content):
+    try:
+        df = pd.read_csv(csv_file)
+        required_cols = ['content']
+        if not all(col in df.columns for col in required_cols):
+            st.error("❌ CSV文件必须包含 'content' 列（聊天内容）")
+            return None
+        if 'chat_id' not in df.columns:
+            df['chat_id'] = range(1, len(df)+1)
+        if 'create_time' not in df.columns:
+            df['create_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if 'user_id' not in df.columns:
+            df['user_id'] = [f"user{random.randint(1, 500)}" for _ in range(len(df))]
+        if 'game_module' not in df.columns:
+            module_keywords = custom_module_rules if custom_module_rules else {
+                "装备系统": ["装备", "数值", "强化", "掉落", "充值", "道具"],
+                "玩法机制": ["副本", "技能", "连招", "数值平衡", "活动", "难度"],
+                "抽卡系统": ["抽卡", "概率", "保底", "新卡", "次数"],
+                "客服互动": ["客服", "响应", "反馈", "解决", "态度"],
+                "版本更新": ["版本", "更新", "卡顿", "BUG", "更新包"],
+                "社交闲聊": ["组队", "聊天", "好友", "公会", "截图"],
+                "BUG反馈": ["闪退", "卡顿", "BUG", "崩溃", "外挂", "登录"],
+                "进度分享": ["升级", "通关", "进度", "任务", "奖励"]
+            }
+            def classify_module(content):
+                if pd.isna(content):
+                    return "未分类"
+                for module, keywords in module_keywords.items():
+                    if any(keyword in str(content) for keyword in keywords):
+                        return module
                 return "未分类"
-            for module, keywords in module_keywords.items():
-                if any(keyword in str(content) for keyword in keywords):
-                    return module
-            return "未分类"
-        df['game_module'] = df['content'].apply(classify_module)
-    df['create_time'] = pd.to_datetime(df['create_time'], errors='coerce')
-    df['content'] = df['content'].fillna('')
-    df['game_module'] = df['game_module'].fillna('未分类')
-    return df
+            df['game_module'] = df['content'].apply(classify_module)
+        df['create_time'] = pd.to_datetime(df['create_time'], errors='coerce')
+        df['content'] = df['content'].fillna('')
+        df['game_module'] = df['game_module'].fillna('未分类')
+        return df
+    except Exception as e:
+        st.error(f"❌ CSV解析失败：{str(e)}")
+        return None
 
 def sentiment_analysis(text, positive_threshold, negative_threshold):
     try:
@@ -151,7 +167,7 @@ def risk_recognition(text, sentiment_score, negative_threshold, custom_risk_word
     has_risk_keyword = any(keyword in text for keyword in risk_keywords)
     return 1 if (has_risk_keyword or sentiment_score <= negative_threshold) else 0
 
-# ========== 可视化替换：用Streamlit原生组件（无matplotlib）==========
+# ========== 可视化优化：美观+无报错 ==========
 def show_sentiment_analysis(df):
     st.subheader("📊 模块AI情感分析结果（SnowNLP模型）")
     all_modules = df[df['game_module'] != "未分类"]['game_module'].unique().tolist()
@@ -165,22 +181,40 @@ def show_sentiment_analysis(df):
     sentiment_stats = df_core.groupby(['game_module', 'sentiment']).size().unstack(fill_value=0)
     sentiment_stats = sentiment_stats.reindex(DEFAULT_8_MODULES, fill_value=0)
     sentiment_stats['总计'] = sentiment_stats.sum(axis=1)
+    
+    # 安全计算占比
     for col in ['积极', '中性', '消极']:
         if col in sentiment_stats.columns:
-            sentiment_stats[f'{col}占比(%)'] = round(sentiment_stats[col] / sentiment_stats['总计'] * 100, 2)
+            sentiment_stats[f'{col}占比(%)'] = round(safe_divide(sentiment_stats[col], sentiment_stats['总计']) * 100, 2)
     
     # 1. 显示详细表格（核心数据）
     st.dataframe(sentiment_stats, use_container_width=True)
     
-    # 2. 用进度条展示各模块消极占比（直观）
+    # 2. 优化版消极占比展示（卡片式+安全进度条）
     st.subheader("⚠️ 各模块消极占比（重点关注）")
-    for module in DEFAULT_8_MODULES:
-        if module in sentiment_stats.index and '消极占比(%)' in sentiment_stats.columns:
-            neg_rate = sentiment_stats.loc[module, '消极占比(%)']
-            # 用颜色区分风险等级
-            color = "red" if neg_rate > 30 else "orange" if neg_rate > 15 else "green"
-            st.markdown(f"**{module}**")
-            st.progress(neg_rate / 100, text=f"消极占比：{neg_rate}%")
+    col_num = 4
+    cols = st.columns(col_num)
+    module_list = [m for m in DEFAULT_8_MODULES if m in sentiment_stats.index]
+    
+    for idx, module in enumerate(module_list):
+        with cols[idx % col_num]:
+            # 安全获取消极占比
+            neg_rate = sentiment_stats.loc[module, '消极占比(%)'] if '消极占比(%)' in sentiment_stats.columns else 0.0
+            # 安全进度条值（限制0-1）
+            progress_val = clamp_value(safe_divide(neg_rate, 100))
+            
+            # 卡片式展示（美观）
+            with st.container(border=True):
+                st.markdown(f"### 🎮 {module}")
+                st.progress(progress_val, text=f"消极占比：{neg_rate}%")
+                
+                # 风险等级标签
+                if neg_rate > 30:
+                    st.markdown(f"<span style='color:red; font-weight:bold;'>🔴 高风险</span>", unsafe_allow_html=True)
+                elif neg_rate > 15:
+                    st.markdown(f"<span style='color:orange; font-weight:bold;'>🟡 中风险</span>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<span style='color:green; font-weight:bold;'>🟢 低风险</span>", unsafe_allow_html=True)
     
     # 3. 分析结论
     st.subheader("💡 情感分析结论（业务价值）")
@@ -209,10 +243,12 @@ def show_keywords_analysis(df, topK):
             module_texts = df[df['game_module'] == module]['content'].tolist()
             keywords = extract_keywords(module_texts, topK)
             if keywords:
-                st.write(f"### 🎯 {module}")
-                # 用列表展示关键词+权重
-                for word, weight in keywords:
-                    st.write(f"- **{word}**（权重：{weight}）")
+                # 卡片式关键词展示
+                with st.container(border=True):
+                    st.markdown(f"### 🎯 {module}")
+                    # 关键词表格化展示
+                    keyword_df = pd.DataFrame(keywords, columns=['关键词', '权重'])
+                    st.dataframe(keyword_df, use_container_width=True, hide_index=True)
 
 def show_risk_analysis(df):
     st.subheader("⚠️ 风险反馈分析（关键词+情感模型）- 业务价值：识别高风险模块")
@@ -223,27 +259,44 @@ def show_risk_analysis(df):
     
     risk_count = len(risk_df)
     total_count = len(df)
-    risk_rate = round(risk_count / total_count * 100, 2)
+    risk_rate = round(safe_divide(risk_count, total_count) * 100, 2)
     
-    # 核心风险数据
-    st.metric(label="风险消息总数", value=f"{risk_count}条", delta=f"占比{risk_rate}%")
-    st.write(f"📌 涉及模块：{', '.join(risk_df['game_module'].unique())}")
+    # 核心风险数据（美化）
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric(label="风险消息总数", value=f"{risk_count}条", delta=f"占比{risk_rate}%", delta_color="inverse")
+    with col2:
+        st.metric(label="涉及模块数", value=f"{len(risk_df['game_module'].unique())}个")
     
-    # 风险模块排名
-    risk_module = risk_df.groupby('game_module').size().sort_values(ascending=False)
+    # 风险模块排名（美化成表格）
     st.subheader("📊 风险模块排名")
-    for idx, (module, count) in enumerate(risk_module.items(), 1):
-        st.markdown(f"{idx}. **{module}**：{count}条风险反馈")
+    risk_module = risk_df.groupby('game_module').size().sort_values(ascending=False).reset_index(name='风险条数')
+    # 添加风险等级
+    risk_module['风险等级'] = risk_module['风险条数'].apply(lambda x: '高风险' if x >= 5 else '中风险' if x >= 2 else '低风险')
+    # 表格美化
+    st.dataframe(
+        risk_module,
+        use_container_width=True,
+        column_config={
+            "game_module": st.column_config.TextColumn("模块名称", width="medium"),
+            "风险条数": st.column_config.NumberColumn("风险条数", format="%d条"),
+            "风险等级": st.column_config.SelectboxColumn("风险等级", options=["高风险", "中风险", "低风险"])
+        }
+    )
     
-    # 风险建议
+    # 风险建议（美化）
     st.subheader("📢 风险预警建议（可落地）")
-    top_risk_module = risk_module.index[0] if not risk_module.empty else '无'
-    top_risk_count = risk_module.iloc[0] if not risk_module.empty else 0
-    st.markdown(f"""
-    - 优先级1：紧急修复【{top_risk_module}】模块（{top_risk_count}条风险反馈）
-    - 优先级2：重点优化高频负面关键词对应的功能
-    - 优先级3：加强服务器稳定性和客服响应效率，降低风险反馈率
-    """)
+    top_risk_module = risk_module.iloc[0]['game_module'] if not risk_module.empty else '无'
+    top_risk_count = risk_module.iloc[0]['风险条数'] if not risk_module.empty else 0
+    # 卡片式建议
+    with st.container(border=True):
+        st.markdown(f"""
+        <div style='line-height: 1.8;'>
+        <p>🔴 <strong>优先级1</strong>：紧急修复【{top_risk_module}】模块（{top_risk_count}条风险反馈）</p>
+        <p>🟡 <strong>优先级2</strong>：重点优化高频负面关键词对应的功能</p>
+        <p>🟢 <strong>优先级3</strong>：加强服务器稳定性和客服响应效率，降低风险反馈率</p>
+        </div>
+        """, unsafe_allow_html=True)
 
 # ========== 主流程（完全保留）==========
 def main():
