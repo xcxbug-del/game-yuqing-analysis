@@ -12,7 +12,7 @@ import numpy as np
 # ========== 基础配置 ==========
 warnings.filterwarnings('ignore')
 st.set_page_config(page_title="游戏测试群舆情分析工具", layout="wide")
-st.title("🎮 游戏测试群舆情分析工具（面试完整版）")
+st.title("🎮 游戏测试群舆情分析工具")
 
 # ========== 工具函数：安全处理数值 ==========
 def safe_divide(a, b, default=0.0):
@@ -399,3 +399,4 @@ BUG反馈,闪退,卡顿,BUG,崩溃,外挂,登录
 if __name__ == "__main__":
     jieba.initialize()
     main()
+
