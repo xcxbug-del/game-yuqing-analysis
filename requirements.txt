@@ -2,7 +2,5 @@ streamlit>=1.35.0
 pandas>=2.0.0
 jieba>=0.42.1
 snownlp>=0.12.3
-matplotlib>=3.7.0
+matplotlib==3.7.2  # 锁定稳定版本，避免API变更
 numpy>=1.24.0
-# 可选：拼音兜底依赖
-pypinyin>=0.50.0
