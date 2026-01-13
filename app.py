@@ -141,14 +141,16 @@ def sentiment_analysis(text, positive_threshold, negative_threshold):
         perturb = random.uniform(-0.05, 0.05)
         final_score = max(0.0, min(1.0, base_score + perturb))
         final_score = round(final_score, 3)
-        if final_score >= positive_threshold:
-            return "积极", final_score
-        elif final_score <= negative_threshold:
+        # 优先判断消极，提高消极命中概率
+        if final_score <= negative_threshold:
             return "消极", final_score
+        elif final_score >= positive_threshold:
+            return "积极", final_score
         else:
             return "中性", final_score
-    except:
-        return "中性", round(random.uniform(0.3, 0.7), 3)
+    except Exception as e:
+        st.warning(f"情感分析异常：{str(e)}")
+        return "中性", 0.5
 
 def extract_keywords(texts, topK):
     def preprocess(text):
@@ -167,51 +169,50 @@ def risk_recognition(text, sentiment_score, negative_threshold, custom_risk_word
     has_risk_keyword = any(keyword in text for keyword in risk_keywords)
     return 1 if (has_risk_keyword or sentiment_score <= negative_threshold) else 0
 
-# ========== 可视化优化：美观+无报错 ==========
+# ========== 可视化优化：最终修复版 ==========
 def show_sentiment_analysis(df):
     st.subheader("📊 模块AI情感分析结果（SnowNLP模型）")
-    # ========== 核心修复：保留所有非未分类模块，不限制8个 ==========
+    # 1. 保留所有非未分类模块
     all_modules = df[df['game_module'] != "未分类"]['game_module'].unique().tolist()
     if not all_modules:
         st.warning("⚠️ 暂无有效分类模块数据")
         return
     
-    # 关键：使用所有非未分类模块，而非强制8个指定模块
     df_core = df[df['game_module'] != "未分类"].copy()
     
-    # 强制指定情感分类，确保三列都存在
+    # 2. 强制指定情感分类，确保三列都存在
     sentiment_categories = ['积极', '中性', '消极']
     df_core['sentiment'] = pd.Categorical(df_core['sentiment'], categories=sentiment_categories)
     
-    # 按所有模块统计（而非仅8个）
+    # 3. 按所有模块统计情感数据
     sentiment_stats = df_core.groupby(['game_module', 'sentiment']).size().unstack(fill_value=0)
     sentiment_stats = sentiment_stats.reindex(columns=sentiment_categories, fill_value=0)
     sentiment_stats['总计'] = sentiment_stats.sum(axis=1)
     
-    # 安全计算占比
+    # 4. 安全计算占比（核心修复：apply逐行计算）
     for col in sentiment_categories:
-        sentiment_stats[f'{col}占比(%)'] = round(safe_divide(sentiment_stats[col], sentiment_stats['总计']) * 100, 2)
+        if col in sentiment_stats.columns:
+            sentiment_stats[f'{col}占比(%)'] = sentiment_stats.apply(
+                lambda row: round((row[col] / row['总计'] * 100) if row['总计'] > 0 else 0, 2),
+                axis=1
+            )
     
-    # 调试：显示所有模块的原始统计
+    # 调试：显示原始统计数据
     st.subheader("🔍 调试：各模块原始情感数据")
     st.dataframe(sentiment_stats, use_container_width=True)
     
-    # 2. 消极占比展示（遍历所有模块，而非仅8个）
+    # 5. 消极占比展示（遍历所有模块）
     st.subheader("⚠️ 各模块消极占比（重点关注）")
     col_num = 4
     cols = st.columns(col_num)
-    # 遍历所有非未分类模块
     module_list = all_modules
     
     for idx, module in enumerate(module_list):
         with cols[idx % col_num]:
-            # 安全获取消极占比（从统计结果中取，而非重新计算）
-            neg_count = sentiment_stats.loc[module, '消极'] if module in sentiment_stats.index else 0
-            total_count = sentiment_stats.loc[module, '总计'] if module in sentiment_stats.index else 1
-            neg_rate = round(safe_divide(neg_count, total_count) * 100, 2)
-            progress_val = clamp_value(safe_divide(neg_rate, 100))
+            # 直接从统计结果取数
+            neg_rate = sentiment_stats.loc[module, '消极占比(%)'] if module in sentiment_stats.index else 0.0
+            progress_val = clamp_value(neg_rate / 100)
             
-            # 卡片式展示
             with st.container(border=True):
                 st.markdown(f"### 🎮 {module}")
                 st.progress(progress_val, text=f"消极占比：{neg_rate}%")
@@ -224,25 +225,28 @@ def show_sentiment_analysis(df):
                 else:
                     st.markdown(f"<span style='color:green; font-weight:bold;'>🟢 低风险</span>", unsafe_allow_html=True)
     
-    # 3. 情感分析结论（从所有模块中找最高消极占比）
+    # 6. 情感分析结论（最终修复：正确取值）
     st.subheader("💡 情感分析结论（业务价值）")
-    if '消极占比(%)' in sentiment_stats.columns and not sentiment_stats.empty:
-        # 找到消极占比最高的模块（排除总计为0的）
-        valid_stats = sentiment_stats[sentiment_stats['总计'] > 0]
-        if not valid_stats.empty:
-            most_negative = valid_stats['消极占比(%)'].idxmax()
-            neg_percent = valid_stats.loc[most_negative, '消极占比(%)']
-            st.error(f"🚨 负面情绪最高模块：{most_negative}（{neg_percent}%）→ 需优先优化")
-            
-            most_positive = valid_stats['积极占比(%)'].idxmax()
-            pos_percent = valid_stats.loc[most_positive, '积极占比(%)']
-            st.success(f"✅ 正面情绪最高模块：{most_positive}（{pos_percent}%）→ 可参考成功经验")
+    valid_stats = sentiment_stats[sentiment_stats['总计'] > 0].copy()
+    
+    if not valid_stats.empty:
+        # 找到消极占比最高的模块和数值
+        max_neg_idx = valid_stats['消极占比(%)'].idxmax()
+        max_neg_value = valid_stats.loc[max_neg_idx, '消极占比(%)']
+        
+        # 找到积极占比最高的模块和数值
+        max_pos_idx = valid_stats['积极占比(%)'].idxmax()
+        max_pos_value = valid_stats.loc[max_pos_idx, '积极占比(%)']
+        
+        # 确保数值正确显示（即使是0也会标注）
+        st.error(f"🚨 负面情绪最高模块：{max_neg_idx}（{max_neg_value}%）→ 需优先优化")
+        st.success(f"✅ 正面情绪最高模块：{max_pos_idx}（{max_pos_value}%）→ 可参考成功经验")
+    else:
+        st.info("ℹ️ 暂无有效情感数据可分析")
 
 def show_keywords_analysis(df, topK):
     st.subheader(f"🔑 核心关键词分析（TF-IDF+jieba模型）- TOP{topK}关键词")
     all_modules = df[df['game_module'] != "未分类"]['game_module'].unique().tolist()
-    DEFAULT_8_MODULES = ["装备系统", "玩法机制", "抽卡系统", "客服互动", "版本更新", "社交闲聊", "BUG反馈", "进度分享"]
-    all_modules = [m for m in DEFAULT_8_MODULES if m in all_modules]
     if not all_modules:
         st.warning("⚠️ 暂无有效分类模块数据")
         return
@@ -254,10 +258,8 @@ def show_keywords_analysis(df, topK):
             module_texts = df[df['game_module'] == module]['content'].tolist()
             keywords = extract_keywords(module_texts, topK)
             if keywords:
-                # 卡片式关键词展示
                 with st.container(border=True):
                     st.markdown(f"### 🎯 {module}")
-                    # 关键词表格化展示
                     keyword_df = pd.DataFrame(keywords, columns=['关键词', '权重'])
                     st.dataframe(keyword_df, use_container_width=True, hide_index=True)
 
@@ -272,19 +274,17 @@ def show_risk_analysis(df):
     total_count = len(df)
     risk_rate = round(safe_divide(risk_count, total_count) * 100, 2)
     
-    # 核心风险数据（美化）
+    # 核心风险数据
     col1, col2 = st.columns(2)
     with col1:
         st.metric(label="风险消息总数", value=f"{risk_count}条", delta=f"占比{risk_rate}%", delta_color="inverse")
     with col2:
         st.metric(label="涉及模块数", value=f"{len(risk_df['game_module'].unique())}个")
     
-    # 风险模块排名（美化成表格）
-    st.subheader("📊 风险模块排名")
+    # 风险模块排名
     risk_module = risk_df.groupby('game_module').size().sort_values(ascending=False).reset_index(name='风险条数')
-    # 添加风险等级
     risk_module['风险等级'] = risk_module['风险条数'].apply(lambda x: '高风险' if x >= 5 else '中风险' if x >= 2 else '低风险')
-    # 表格美化
+    st.subheader("📊 风险模块排名")
     st.dataframe(
         risk_module,
         use_container_width=True,
@@ -295,11 +295,10 @@ def show_risk_analysis(df):
         }
     )
     
-    # 风险建议（美化）
+    # 风险建议
     st.subheader("📢 风险预警建议（可落地）")
     top_risk_module = risk_module.iloc[0]['game_module'] if not risk_module.empty else '无'
     top_risk_count = risk_module.iloc[0]['风险条数'] if not risk_module.empty else 0
-    # 卡片式建议
     with st.container(border=True):
         st.markdown(f"""
         <div style='line-height: 1.8;'>
@@ -309,7 +308,7 @@ def show_risk_analysis(df):
         </div>
         """, unsafe_allow_html=True)
 
-# ========== 主流程（完全保留）==========
+# ========== 主流程（调整阈值默认值）==========
 def main():
     st.sidebar.header("⚙️ 全自定义配置（实时生效）")
     st.sidebar.subheader("1. 模块匹配规则配置")
@@ -340,9 +339,13 @@ BUG反馈,闪退,卡顿,BUG,崩溃,外挂,登录
                 keywords = [p.strip() for p in parts[1:] if p.strip()]
                 if module_name and keywords:
                     custom_module_rules[module_name] = keywords
+    
+    # 调整阈值默认值，提高消极命中概率
     st.sidebar.subheader("2. 情感分析阈值")
     positive_threshold = st.sidebar.slider("积极阈值", 0.5, 0.9, 0.65, 0.05, help="越高，判定为积极的文本越少")
-    negative_threshold = st.sidebar.slider("消极阈值", 0.9, 0.5, 0.35, 0.05, help="越低，判定为消极的文本越少")
+    # 消极阈值默认值改为0.5，更容易命中
+    negative_threshold = st.sidebar.slider("消极阈值", 0.0, 0.5, 0.5, 0.05, help="越高，判定为消极的文本越多（0.5为宽松阈值）")
+    
     st.sidebar.subheader("3. 关键词分析配置")
     topK = st.sidebar.number_input("TOP关键词数量", 3, 20, 8, 1, help="建议5-10")
     st.sidebar.subheader("4. 风险识别配置")
@@ -370,18 +373,23 @@ BUG反馈,闪退,卡顿,BUG,崩溃,外挂,登录
                 st.success(f"✅ 成功解析CSV文件，共{len(df)}条记录")
     
     if df is not None and not df.empty:
+        # 情感分析
         df[['sentiment', 'sentiment_score']] = df['content'].apply(
             lambda x: pd.Series(sentiment_analysis(x, positive_threshold, negative_threshold))
         )
+        # 风险识别
         df['is_risk'] = df.apply(
             lambda row: risk_recognition(row['content'], row['sentiment_score'], negative_threshold, custom_risk_words),
             axis=1
         )
+        
+        # 显示结果
         st.header("📈 数据分析结果")
         st.subheader("数据概览")
         st.dataframe(df.head(10), use_container_width=True)
         st.write(f"📊 数据总量：{len(df)}条 | 分类模块数：{len(df['game_module'].unique())}个 | 未分类数据：{len(df[df['game_module']=='未分类'])}条")
         
+        # 可视化分析
         show_sentiment_analysis(df)
         st.divider()
         show_keywords_analysis(df, topK)
@@ -391,5 +399,3 @@ BUG反馈,闪退,卡顿,BUG,崩溃,外挂,登录
 if __name__ == "__main__":
     jieba.initialize()
     main()
-
-
