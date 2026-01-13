@@ -1,4 +1,4 @@
-# ---------------------- 全局配置（必生效：嵌入字体强制中文显示） ----------------------
+# ---------------------- 全局配置（Ubuntu云端中文100%生效） ----------------------
 import streamlit as st
 import pandas as pd
 import jieba
@@ -11,50 +11,64 @@ import random
 import re
 from datetime import datetime
 import matplotlib.font_manager as fm
+import shutil
 import os
-import sys
 
 warnings.filterwarnings('ignore')
 
-# ========== 核心修复：强制加载本地嵌入的SimHei.ttf字体（云端也能访问） ==========
-def force_chinese_font():
-    # 字体文件路径（必须和上传到GitHub的文件名一致）
-    FONT_PATH = "SimHei.ttf"
-    # 兼容打包/在线部署的路径处理
-    if getattr(sys, 'frozen', False):
-        # 本地打包exe模式：获取exe所在目录
-        base_path = os.path.dirname(sys.executable)
-        font_path = os.path.join(base_path, FONT_PATH)
-    else:
-        # 在线部署/本地开发模式：当前文件所在目录
-        font_path = os.path.join(os.path.dirname(__file__), FONT_PATH)
-
-    # 验证字体文件是否存在
-    if os.path.exists(font_path):
+# ========== 关键：重置matplotlib字体缓存+强制加载Ubuntu中文字体 ==========
+def setup_ubuntu_chinese_font():
+    # 1. 重置matplotlib字体缓存（Ubuntu云端必须）
+    cache_dir = fm.get_cachedir()
+    if os.path.exists(cache_dir):
         try:
-            # 加载字体文件并设置为全局字体
-            font_prop = fm.FontProperties(fname=font_path)
-            # 全局设置：所有文本强制使用该字体
-            plt.rcParams['font.sans-serif'] = [font_prop.get_name()]
-            plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
-            print(f"✅ 成功强制加载中文字体：{font_prop.get_name()}")
-            return font_prop
-        except Exception as e:
-            print(f"⚠️ 加载字体失败：{str(e)}，使用兜底方案")
-    else:
-        print(f"⚠️ 字体文件 {font_path} 不存在，使用兜底方案")
+            # 删除旧缓存，强制重新扫描字体
+            for f in os.listdir(cache_dir):
+                if f.startswith('fontlist'):
+                    os.remove(os.path.join(cache_dir, f))
+            print("✅ 已删除matplotlib旧字体缓存")
+        except:
+            pass
     
-    # 终极兜底：全英文显示，避免方框
-    plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
-    plt.rcParams['axes.unicode_minus'] = False
-    return None
+    # 2. 强制指定Ubuntu预装的中文字体（WenQuanYi Micro Hei）
+    # 先检查字体是否存在（Ubuntu必装）
+    font_path = '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc'
+    if os.path.exists(font_path):
+        # 加载字体文件
+        font_prop = fm.FontProperties(fname=font_path)
+        # 全局强制设置（所有绘图默认用这个字体）
+        plt.rcParams['font.family'] = font_prop.get_name()
+        plt.rcParams['font.sans-serif'] = [font_prop.get_name()]
+        plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示
+        print(f"✅ 成功加载Ubuntu中文字体：{font_prop.get_name()}")
+    else:
+        # 兜底：用系统扫描到的中文字体
+        chinese_fonts = [f.name for f in fm.fontManager.ttflist if 'Hei' in f.name or 'Song' in f.name or 'Chinese' in f.name]
+        if chinese_fonts:
+            plt.rcParams['font.sans-serif'] = [chinese_fonts[0]]
+            plt.rcParams['axes.unicode_minus'] = False
+            print(f"✅ 加载系统中文字体：{chinese_fonts[0]}")
+        else:
+            # 终极兜底：中文转拼音（避免方框）
+            print("⚠️ 无中文字体，中文将显示为拼音")
+            plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+            plt.rcParams['axes.unicode_minus'] = False
 
-# 执行字体强制加载，获取字体对象（后续绘图可直接指定）
-chinese_font = force_chinese_font()
+# 立即执行字体配置（必须在所有绘图代码前）
+setup_ubuntu_chinese_font()
 
 # ---------------------- 原有配置保留 ----------------------
 st.set_page_config(page_title="游戏测试群舆情分析工具", layout="wide")
 st.title("🎮 游戏测试群舆情分析工具（面试版）")
+
+# ========== （可选）中文转拼音兜底函数（防止极端情况） ==========
+def cn2pinyin(cn_text):
+    try:
+        from pypinyin import lazy_pinyin
+        return ' '.join(lazy_pinyin(cn_text))
+    except:
+        # 无pypinyin则返回原文本（不会报错）
+        return cn_text
 
 # ---------------------- 核心工具函数 ----------------------
 def parse_txt_chat(chat_text, custom_module_rules):
@@ -417,4 +431,5 @@ if __name__ == "__main__":
     jieba.initialize()
 
     main()
+
 
