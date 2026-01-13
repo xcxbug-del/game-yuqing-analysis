@@ -4,3 +4,5 @@ jieba>=0.42.1
 snownlp>=0.12.3
 matplotlib>=3.7.0
 numpy>=1.24.0
+# 可选：拼音兜底依赖
+pypinyin>=0.50.0
