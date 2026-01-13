@@ -170,48 +170,48 @@ def risk_recognition(text, sentiment_score, negative_threshold, custom_risk_word
 # ========== 可视化优化：美观+无报错 ==========
 def show_sentiment_analysis(df):
     st.subheader("📊 模块AI情感分析结果（SnowNLP模型）")
+    # ========== 核心修复：保留所有非未分类模块，不限制8个 ==========
     all_modules = df[df['game_module'] != "未分类"]['game_module'].unique().tolist()
-    DEFAULT_8_MODULES = ["装备系统", "玩法机制", "抽卡系统", "客服互动", "版本更新", "社交闲聊", "BUG反馈", "进度分享"]
     if not all_modules:
         st.warning("⚠️ 暂无有效分类模块数据")
         return
     
-    df_core = df[df['game_module'].isin(DEFAULT_8_MODULES)].copy()
-    # ========== 关键修复：强制指定情感分类，确保三列都存在 ==========
+    # 关键：使用所有非未分类模块，而非强制8个指定模块
+    df_core = df[df['game_module'] != "未分类"].copy()
+    
+    # 强制指定情感分类，确保三列都存在
     sentiment_categories = ['积极', '中性', '消极']
     df_core['sentiment'] = pd.Categorical(df_core['sentiment'], categories=sentiment_categories)
     
-    # 统计情感数据
+    # 按所有模块统计（而非仅8个）
     sentiment_stats = df_core.groupby(['game_module', 'sentiment']).size().unstack(fill_value=0)
-    # 确保列顺序正确
     sentiment_stats = sentiment_stats.reindex(columns=sentiment_categories, fill_value=0)
-    
     sentiment_stats['总计'] = sentiment_stats.sum(axis=1)
     
     # 安全计算占比
     for col in sentiment_categories:
-        if col in sentiment_stats.columns:
-            sentiment_stats[f'{col}占比(%)'] = round(safe_divide(sentiment_stats[col], sentiment_stats['总计']) * 100, 2)
+        sentiment_stats[f'{col}占比(%)'] = round(safe_divide(sentiment_stats[col], sentiment_stats['总计']) * 100, 2)
     
-    # ========== 新增调试输出：查看原始情感分布 ==========
-    st.subheader("🔍 调试：整体情感分布")
-    overall_sentiment = df_core['sentiment'].value_counts()
-    st.dataframe(overall_sentiment, use_container_width=True)
+    # 调试：显示所有模块的原始统计
+    st.subheader("🔍 调试：各模块原始情感数据")
+    st.dataframe(sentiment_stats, use_container_width=True)
     
-    # 2. 优化版消极占比展示（卡片式+安全进度条）
+    # 2. 消极占比展示（遍历所有模块，而非仅8个）
     st.subheader("⚠️ 各模块消极占比（重点关注）")
     col_num = 4
     cols = st.columns(col_num)
-    module_list = [m for m in DEFAULT_8_MODULES if m in sentiment_stats.index]
+    # 遍历所有非未分类模块
+    module_list = all_modules
     
     for idx, module in enumerate(module_list):
         with cols[idx % col_num]:
-            # 安全获取消极占比
-            neg_rate = sentiment_stats.loc[module, '消极占比(%)'] if '消极占比(%)' in sentiment_stats.columns else 0.0
-            # 安全进度条值（限制0-1）
+            # 安全获取消极占比（从统计结果中取，而非重新计算）
+            neg_count = sentiment_stats.loc[module, '消极'] if module in sentiment_stats.index else 0
+            total_count = sentiment_stats.loc[module, '总计'] if module in sentiment_stats.index else 1
+            neg_rate = round(safe_divide(neg_count, total_count) * 100, 2)
             progress_val = clamp_value(safe_divide(neg_rate, 100))
             
-            # 卡片式展示（美观）
+            # 卡片式展示
             with st.container(border=True):
                 st.markdown(f"### 🎮 {module}")
                 st.progress(progress_val, text=f"消极占比：{neg_rate}%")
@@ -224,16 +224,19 @@ def show_sentiment_analysis(df):
                 else:
                     st.markdown(f"<span style='color:green; font-weight:bold;'>🟢 低风险</span>", unsafe_allow_html=True)
     
-    # 3. 分析结论
+    # 3. 情感分析结论（从所有模块中找最高消极占比）
     st.subheader("💡 情感分析结论（业务价值）")
-    if '消极占比(%)' in sentiment_stats.columns:
-        most_negative = sentiment_stats['消极占比(%)'].idxmax()
-        neg_percent = sentiment_stats.loc[most_negative, '消极占比(%)']
-        st.error(f"🚨 负面情绪最高模块：{most_negative}（{neg_percent}%）→ 需优先优化")
-    if '积极占比(%)' in sentiment_stats.columns:
-        most_positive = sentiment_stats['积极占比(%)'].idxmax()
-        pos_percent = sentiment_stats.loc[most_positive, '积极占比(%)']
-        st.success(f"✅ 正面情绪最高模块：{most_positive}（{pos_percent}%）→ 可参考成功经验")
+    if '消极占比(%)' in sentiment_stats.columns and not sentiment_stats.empty:
+        # 找到消极占比最高的模块（排除总计为0的）
+        valid_stats = sentiment_stats[sentiment_stats['总计'] > 0]
+        if not valid_stats.empty:
+            most_negative = valid_stats['消极占比(%)'].idxmax()
+            neg_percent = valid_stats.loc[most_negative, '消极占比(%)']
+            st.error(f"🚨 负面情绪最高模块：{most_negative}（{neg_percent}%）→ 需优先优化")
+            
+            most_positive = valid_stats['积极占比(%)'].idxmax()
+            pos_percent = valid_stats.loc[most_positive, '积极占比(%)']
+            st.success(f"✅ 正面情绪最高模块：{most_positive}（{pos_percent}%）→ 可参考成功经验")
 
 def show_keywords_analysis(df, topK):
     st.subheader(f"🔑 核心关键词分析（TF-IDF+jieba模型）- TOP{topK}关键词")
@@ -388,4 +391,5 @@ BUG反馈,闪退,卡顿,BUG,崩溃,外挂,登录
 if __name__ == "__main__":
     jieba.initialize()
     main()
+
 
