@@ -177,18 +177,26 @@ def show_sentiment_analysis(df):
         return
     
     df_core = df[df['game_module'].isin(DEFAULT_8_MODULES)].copy()
+    # ========== 关键修复：强制指定情感分类，确保三列都存在 ==========
+    sentiment_categories = ['积极', '中性', '消极']
+    df_core['sentiment'] = pd.Categorical(df_core['sentiment'], categories=sentiment_categories)
+    
     # 统计情感数据
     sentiment_stats = df_core.groupby(['game_module', 'sentiment']).size().unstack(fill_value=0)
-    sentiment_stats = sentiment_stats.reindex(DEFAULT_8_MODULES, fill_value=0)
+    # 确保列顺序正确
+    sentiment_stats = sentiment_stats.reindex(columns=sentiment_categories, fill_value=0)
+    
     sentiment_stats['总计'] = sentiment_stats.sum(axis=1)
     
     # 安全计算占比
-    for col in ['积极', '中性', '消极']:
+    for col in sentiment_categories:
         if col in sentiment_stats.columns:
             sentiment_stats[f'{col}占比(%)'] = round(safe_divide(sentiment_stats[col], sentiment_stats['总计']) * 100, 2)
     
-    # 1. 显示详细表格（核心数据）
-    st.dataframe(sentiment_stats, use_container_width=True)
+    # ========== 新增调试输出：查看原始情感分布 ==========
+    st.subheader("🔍 调试：整体情感分布")
+    overall_sentiment = df_core['sentiment'].value_counts()
+    st.dataframe(overall_sentiment, use_container_width=True)
     
     # 2. 优化版消极占比展示（卡片式+安全进度条）
     st.subheader("⚠️ 各模块消极占比（重点关注）")
@@ -331,7 +339,7 @@ BUG反馈,闪退,卡顿,BUG,崩溃,外挂,登录
                     custom_module_rules[module_name] = keywords
     st.sidebar.subheader("2. 情感分析阈值")
     positive_threshold = st.sidebar.slider("积极阈值", 0.5, 0.9, 0.65, 0.05, help="越高，判定为积极的文本越少")
-    negative_threshold = st.sidebar.slider("消极阈值", 0.0, 0.5, 0.35, 0.05, help="越低，判定为消极的文本越少")
+    negative_threshold = st.sidebar.slider("消极阈值", 0.9, 0.5, 0.35, 0.05, help="越低，判定为消极的文本越少")
     st.sidebar.subheader("3. 关键词分析配置")
     topK = st.sidebar.number_input("TOP关键词数量", 3, 20, 8, 1, help="建议5-10")
     st.sidebar.subheader("4. 风险识别配置")
@@ -380,3 +388,4 @@ BUG反馈,闪退,卡顿,BUG,崩溃,外挂,登录
 if __name__ == "__main__":
     jieba.initialize()
     main()
+
