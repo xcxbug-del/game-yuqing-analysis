@@ -1,4 +1,4 @@
-# ---------------------- 全局配置（修复云端中文字体） ----------------------
+# ---------------------- 全局配置（必生效：嵌入字体强制中文显示） ----------------------
 import streamlit as st
 import pandas as pd
 import jieba
@@ -12,38 +12,49 @@ import re
 from datetime import datetime
 import matplotlib.font_manager as fm
 import os
+import sys
+
 warnings.filterwarnings('ignore')
 
-# ========== 核心修复：适配云端/本地中文字体 ==========
-def setup_chinese_font():
-    # 1. 定义中文字体名称（兼容Windows/Linux）
-    font_names = ['SimHei', 'WenQuanYi Micro Hei', 'DejaVu Sans', 'Microsoft YaHei']
-    # 2. 尝试注册字体（云端自动找可用字体，本地用系统字体）
-    for font_name in font_names:
+# ========== 核心修复：强制加载本地嵌入的SimHei.ttf字体（云端也能访问） ==========
+def force_chinese_font():
+    # 字体文件路径（必须和上传到GitHub的文件名一致）
+    FONT_PATH = "SimHei.ttf"
+    # 兼容打包/在线部署的路径处理
+    if getattr(sys, 'frozen', False):
+        # 本地打包exe模式：获取exe所在目录
+        base_path = os.path.dirname(sys.executable)
+        font_path = os.path.join(base_path, FONT_PATH)
+    else:
+        # 在线部署/本地开发模式：当前文件所在目录
+        font_path = os.path.join(os.path.dirname(__file__), FONT_PATH)
+
+    # 验证字体文件是否存在
+    if os.path.exists(font_path):
         try:
-            # 设置字体
-            plt.rcParams['font.sans-serif'] = [font_name]
+            # 加载字体文件并设置为全局字体
+            font_prop = fm.FontProperties(fname=font_path)
+            # 全局设置：所有文本强制使用该字体
+            plt.rcParams['font.sans-serif'] = [font_prop.get_name()]
             plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
-            # 验证字体是否生效
-            test_text = "测试中文显示"
-            fig, ax = plt.subplots(figsize=(1,1))
-            ax.text(0.5, 0.5, test_text)
-            plt.close(fig)
-            print(f"✅ 成功加载字体：{font_name}")
-            return
-        except:
-            continue
-    # 3. 终极兜底：强制关闭中文渲染（用拼音/英文，避免方框）
-    print("⚠️ 无可用中文字体，切换为英文显示")
+            print(f"✅ 成功强制加载中文字体：{font_prop.get_name()}")
+            return font_prop
+        except Exception as e:
+            print(f"⚠️ 加载字体失败：{str(e)}，使用兜底方案")
+    else:
+        print(f"⚠️ 字体文件 {font_path} 不存在，使用兜底方案")
+    
+    # 终极兜底：全英文显示，避免方框
     plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
     plt.rcParams['axes.unicode_minus'] = False
+    return None
 
-# 立即执行字体配置（必须在所有绘图代码前）
-setup_chinese_font()
+# 执行字体强制加载，获取字体对象（后续绘图可直接指定）
+chinese_font = force_chinese_font()
 
 # ---------------------- 原有配置保留 ----------------------
 st.set_page_config(page_title="游戏测试群舆情分析工具", layout="wide")
-st.title("🎮 游戏测试群舆情分析工具")
+st.title("🎮 游戏测试群舆情分析工具（面试版）")
 
 # ---------------------- 核心工具函数 ----------------------
 def parse_txt_chat(chat_text, custom_module_rules):
@@ -406,3 +417,4 @@ if __name__ == "__main__":
     jieba.initialize()
 
     main()
+
