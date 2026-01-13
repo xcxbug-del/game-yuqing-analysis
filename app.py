@@ -1,3 +1,4 @@
+# ---------------------- 全局配置（修复云端中文字体） ----------------------
 import streamlit as st
 import pandas as pd
 import jieba
@@ -9,11 +10,38 @@ import warnings
 import random
 import re
 from datetime import datetime
+import matplotlib.font_manager as fm
+import os
 warnings.filterwarnings('ignore')
 
-# ---------------------- 全局配置 ----------------------
-plt.rcParams['font.sans-serif'] = ['SimHei']
-plt.rcParams['axes.unicode_minus'] = False
+# ========== 核心修复：适配云端/本地中文字体 ==========
+def setup_chinese_font():
+    # 1. 定义中文字体名称（兼容Windows/Linux）
+    font_names = ['SimHei', 'WenQuanYi Micro Hei', 'DejaVu Sans', 'Microsoft YaHei']
+    # 2. 尝试注册字体（云端自动找可用字体，本地用系统字体）
+    for font_name in font_names:
+        try:
+            # 设置字体
+            plt.rcParams['font.sans-serif'] = [font_name]
+            plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+            # 验证字体是否生效
+            test_text = "测试中文显示"
+            fig, ax = plt.subplots(figsize=(1,1))
+            ax.text(0.5, 0.5, test_text)
+            plt.close(fig)
+            print(f"✅ 成功加载字体：{font_name}")
+            return
+        except:
+            continue
+    # 3. 终极兜底：强制关闭中文渲染（用拼音/英文，避免方框）
+    print("⚠️ 无可用中文字体，切换为英文显示")
+    plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+    plt.rcParams['axes.unicode_minus'] = False
+
+# 立即执行字体配置（必须在所有绘图代码前）
+setup_chinese_font()
+
+# ---------------------- 原有配置保留 ----------------------
 st.set_page_config(page_title="游戏测试群舆情分析工具", layout="wide")
 st.title("🎮 游戏测试群舆情分析工具")
 
@@ -376,4 +404,5 @@ BUG反馈,闪退,卡顿,BUG,崩溃,外挂,登录
 
 if __name__ == "__main__":
     jieba.initialize()
+
     main()
